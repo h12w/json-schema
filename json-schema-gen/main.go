@@ -13,21 +13,16 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("json-schema-gen [filename]")
+		fmt.Println("json-schema-gen [filenames...]")
 		return
 	}
-	filename := os.Args[1]
-	var s schema.Schema
-	f, err := os.Open(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := json.NewDecoder(f).Decode(&s); err != nil {
-		log.Fatal(err)
-	}
-	decls, err := goTypeDecls(s.ID, &s)
-	if err != nil {
-		log.Fatal(err)
+	var decls []*gengo.TypeDecl
+	for _, filename := range os.Args[1:] {
+		ds, err := collectDecls(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		decls = append(decls, ds...)
 	}
 	codeFile := gengo.File{
 		PackageName: "openrtb",
@@ -36,12 +31,33 @@ func main() {
 	codeFile.Fprint(os.Stdout)
 }
 
+func collectDecls(filename string) ([]*gengo.TypeDecl, error) {
+	var s schema.Schema
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := json.NewDecoder(f).Decode(&s); err != nil {
+		return nil, err
+	}
+	decls, err := goTypeDecls(s.ID, &s)
+	if err != nil {
+		return nil, err
+	}
+	return decls, nil
+}
+
 func filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl) {
+	m := make(map[string]bool)
 	for _, decl := range decls {
 		switch decl.Name {
 		case "PositiveInt", "BooleanInt":
 		default:
-			res = append(res, decl)
+			if !m[decl.Name] {
+				res = append(res, decl)
+				m[decl.Name] = true
+			}
 		}
 	}
 	return
