@@ -49,21 +49,43 @@ func collectDecls(filename string) ([]*gengo.TypeDecl, error) {
 }
 
 func filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl) {
-	m := make(map[string]bool)
+	m := make(map[string]*gengo.TypeDecl)
 	for _, decl := range decls {
+		if m[decl.Name] == nil {
+			m[decl.Name] = decl
+		}
+	}
+
+	for _, decl := range m {
+		for _, field := range decl.Type.Fields {
+			if field.Type.Kind == gengo.IdentKind {
+				if t, ok := m[field.Type.Ident]; ok && t.Type.Kind != gengo.IdentKind {
+					field.Type.Ident = "*" + field.Type.Ident
+				}
+			}
+		}
 		switch decl.Name {
 		case "PositiveInt", "BooleanInt":
 		default:
-			if !m[decl.Name] {
-				res = append(res, decl)
-				m[decl.Name] = true
-			}
+			res = append(res, decl)
 		}
 	}
 	return
 }
 
 func goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
+	if len(s.Properties) == 0 {
+		if typ, ok := s.Type.(string); ok {
+			if identType, err := goIdentType(typ); err == nil {
+				return []*gengo.TypeDecl{
+					{
+						Name: exportedGoName(id),
+						Type: *identType,
+					},
+				}, nil
+			}
+		}
+	}
 	var fields []*gengo.Field
 	for name, prop := range s.Properties {
 		goType, err := goType(prop)
@@ -73,6 +95,15 @@ func goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
 		fields = append(fields, &gengo.Field{
 			Name: exportedGoName(name),
 			Type: *goType,
+			Tag: &gengo.Tag{
+				Parts: []*gengo.TagPart{
+					{
+						Encoding:  "json",
+						Name:      name,
+						OmitEmpty: true,
+					},
+				},
+			},
 		})
 	}
 	decls := []*gengo.TypeDecl{
@@ -152,7 +183,7 @@ func goIdentType(typ string) (*gengo.Type, error) {
 	case "number":
 		ident = "float32"
 	default:
-		ident = "*" + exportedGoName(typ)
+		ident = exportedGoName(typ)
 	}
 	return &gengo.Type{
 		Kind:  gengo.IdentKind,
