@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
 	"h12.me/gengo"
@@ -12,13 +13,18 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("json-schema-gen [filenames...]")
+	if len(os.Args) < 3 {
+		fmt.Println("json-schema-gen [name map file] [filenames...]")
 		return
 	}
+	nameMap, err := readNameMap(os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
+	g := generator{nameMap}
 	var decls []*gengo.TypeDecl
-	for _, filename := range os.Args[1:] {
-		ds, err := collectDecls(filename)
+	for _, filename := range os.Args[2:] {
+		ds, err := g.collectDecls(filename)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -26,12 +32,19 @@ func main() {
 	}
 	codeFile := gengo.File{
 		PackageName: "openrtb",
-		TypeDecls:   filterDecls(decls),
+		TypeDecls:   g.filterDecls(decls),
 	}
-	codeFile.Fprint(os.Stdout)
+	sort.Sort(codeFile.TypeDecls)
+	if err := codeFile.Marshal(os.Stdout); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func collectDecls(filename string) ([]*gengo.TypeDecl, error) {
+type generator struct {
+	nameMap
+}
+
+func (g *generator) collectDecls(filename string) ([]*gengo.TypeDecl, error) {
 	var s schema.Schema
 	f, err := os.Open(filename)
 	if err != nil {
@@ -41,14 +54,14 @@ func collectDecls(filename string) ([]*gengo.TypeDecl, error) {
 	if err := json.NewDecoder(f).Decode(&s); err != nil {
 		return nil, err
 	}
-	decls, err := goTypeDecls(s.ID, &s)
+	decls, err := g.goTypeDecls(s.ID, &s)
 	if err != nil {
 		return nil, err
 	}
 	return decls, nil
 }
 
-func filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl) {
+func (g *generator) filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl) {
 	m := make(map[string]*gengo.TypeDecl)
 	for _, decl := range decls {
 		if m[decl.Name] == nil {
@@ -73,42 +86,42 @@ func filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl) {
 	return
 }
 
-func goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
+func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
 	if len(s.Properties) == 0 {
 		if typ, ok := s.Type.(string); ok {
-			if identType, err := goIdentType(typ); err == nil {
+			if identType, err := g.goIdentType(typ); err == nil {
 				return []*gengo.TypeDecl{
 					{
-						Name: exportedGoName(id),
+						Name: g.exportedGoName(id),
 						Type: *identType,
 					},
 				}, nil
 			}
 		}
 	}
-	var fields []*gengo.Field
+	var fields gengo.Fields
 	for name, prop := range s.Properties {
-		goType, err := goType(prop)
+		goType, err := g.goType(prop)
 		if err != nil {
 			return nil, err
 		}
-		fields = append(fields, &gengo.Field{
-			Name: exportedGoName(name),
+		field := &gengo.Field{
+			Name: g.exportedGoName(name),
 			Type: *goType,
-			Tag: &gengo.Tag{
-				Parts: []*gengo.TagPart{
-					{
-						Encoding:  "json",
-						Name:      name,
-						OmitEmpty: true,
-					},
+			Tag: gengo.Tag{
+				{
+					Encoding:  "json",
+					Name:      name,
+					OmitEmpty: true,
 				},
 			},
-		})
+		}
+		fields = append(fields, field)
 	}
+	sort.Sort(fields)
 	decls := []*gengo.TypeDecl{
 		{
-			Name: exportedGoName(id),
+			Name: g.exportedGoName(id),
 			Type: gengo.Type{
 				Kind:   gengo.StructKind,
 				Fields: fields,
@@ -117,7 +130,7 @@ func goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
 	}
 
 	for id, def := range s.Definitions {
-		subDecls, err := goTypeDecls(id, def)
+		subDecls, err := g.goTypeDecls(id, def)
 		if err != nil {
 			return nil, err
 		}
@@ -128,12 +141,12 @@ func goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
 
 const defPrefix = "#/definitions/"
 
-func goType(s *schema.Schema) (*gengo.Type, error) {
+func (g *generator) goType(s *schema.Schema) (*gengo.Type, error) {
 	switch s.Type {
 	case "string", "integer", "number":
-		return goIdentType(s.Type.(string))
+		return g.goIdentType(s.Type.(string))
 	case "array":
-		itemType, err := goType(s.Items)
+		itemType, err := g.goType(s.Items)
 		if err != nil {
 			return nil, err
 		}
@@ -151,27 +164,12 @@ func goType(s *schema.Schema) (*gengo.Type, error) {
 		}, nil
 	}
 	if s.Ref != nil && strings.HasPrefix(string(*s.Ref), defPrefix) {
-		return goIdentType(strings.TrimPrefix(string(*s.Ref), defPrefix))
+		return g.goIdentType(strings.TrimPrefix(string(*s.Ref), defPrefix))
 	}
 	return nil, fmt.Errorf("fail to find Go type for %v", s)
 }
 
-func exportedGoName(s string) string {
-	s = snakeToCamel(s)
-	if strings.HasSuffix(s, "Id") {
-		return strings.TrimSuffix(s, "Id") + "ID"
-	}
-	return s
-}
-func snakeToCamel(s string) string {
-	ss := strings.Split(s, "_")
-	for i := range ss {
-		ss[i] = strings.Title(ss[i])
-	}
-	return strings.Join(ss, "")
-}
-
-func goIdentType(typ string) (*gengo.Type, error) {
+func (g *generator) goIdentType(typ string) (*gengo.Type, error) {
 	ident := ""
 	switch typ {
 	case "string":
@@ -183,7 +181,7 @@ func goIdentType(typ string) (*gengo.Type, error) {
 	case "number":
 		ident = "float32"
 	default:
-		ident = exportedGoName(typ)
+		ident = g.exportedGoName(typ)
 	}
 	return &gengo.Type{
 		Kind:  gengo.IdentKind,
