@@ -114,6 +114,11 @@ func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl,
 					Name:      name,
 					OmitEmpty: true,
 				},
+				{
+					Encoding:  "yaml",
+					Name:      name,
+					OmitEmpty: true,
+				},
 			},
 		}
 		fields = append(fields, field)
