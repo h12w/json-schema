@@ -72,7 +72,7 @@ func (g *generator) filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl)
 	for _, decl := range m {
 		for _, field := range decl.Type.Fields {
 			if field.Type.Kind == gengo.IdentKind {
-				if t, ok := m[field.Type.Ident]; ok && t.Type.Kind != gengo.IdentKind {
+				if t, ok := m[field.Type.Ident]; ok && t.Type.Kind != gengo.IdentKind || !ok && !isSimpleType(field.Type.Ident) {
 					field.Type.Ident = "*" + field.Type.Ident
 				}
 			}
@@ -84,6 +84,14 @@ func (g *generator) filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl)
 		}
 	}
 	return
+}
+
+func isSimpleType(s string) bool {
+	switch s {
+	case "string", "int", "bool", "BoolInt", "float32", "float64", "interface{}":
+		return true
+	}
+	return false
 }
 
 func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
