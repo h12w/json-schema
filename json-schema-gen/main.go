@@ -113,6 +113,13 @@ func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl,
 		if err != nil {
 			return nil, err
 		}
+		omitEmpty := true
+		switch goType.Ident {
+		case "float32", "float64":
+			if strings.Contains(strings.ToLower(name), "price") {
+				omitEmpty = false
+			}
+		}
 		field := &gengo.Field{
 			Name: g.exportedGoName(name),
 			Type: *goType,
@@ -120,12 +127,12 @@ func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl,
 				{
 					Encoding:  "json",
 					Name:      name,
-					OmitEmpty: true,
+					OmitEmpty: omitEmpty,
 				},
 				{
 					Encoding:  "yaml",
 					Name:      name,
-					OmitEmpty: true,
+					OmitEmpty: omitEmpty,
 				},
 			},
 		}
