@@ -33,6 +33,9 @@ func main() {
 	codeFile := gengo.File{
 		PackageName: "openrtb",
 		TypeDecls:   g.filterDecls(decls),
+		Imports: []*gengo.Import{
+			{Path: "h12.me/decimal"},
+		},
 	}
 	sort.Sort(codeFile.TypeDecls)
 	if err := codeFile.Marshal(os.Stdout); err != nil {
@@ -88,7 +91,7 @@ func (g *generator) filterDecls(decls []*gengo.TypeDecl) (res []*gengo.TypeDecl)
 
 func isSimpleType(s string) bool {
 	switch s {
-	case "string", "int", "bool", "BoolInt", "float32", "float64", "interface{}":
+	case "string", "int", "bool", "BoolInt", "float32", "float64", "interface{}", "decimal.D":
 		return true
 	}
 	return false
@@ -97,7 +100,7 @@ func isSimpleType(s string) bool {
 func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl, error) {
 	if len(s.Properties) == 0 {
 		if typ, ok := s.Type.(string); ok {
-			if identType, err := g.goIdentType(typ); err == nil {
+			if identType, err := g.goIdentType(id, typ); err == nil {
 				return []*gengo.TypeDecl{
 					{
 						Name: g.exportedGoName(id),
@@ -109,7 +112,7 @@ func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl,
 	}
 	var fields gengo.Fields
 	for name, prop := range s.Properties {
-		goType, err := g.goType(prop)
+		goType, err := g.goType(name, prop)
 		if err != nil {
 			return nil, err
 		}
@@ -161,12 +164,12 @@ func (g *generator) goTypeDecls(id string, s *schema.Schema) ([]*gengo.TypeDecl,
 
 const defPrefix = "#/definitions/"
 
-func (g *generator) goType(s *schema.Schema) (*gengo.Type, error) {
+func (g *generator) goType(name string, s *schema.Schema) (*gengo.Type, error) {
 	switch s.Type {
 	case "string", "integer", "number":
-		return g.goIdentType(s.Type.(string))
+		return g.goIdentType(name, s.Type.(string))
 	case "array":
-		itemType, err := g.goType(s.Items)
+		itemType, err := g.goType(name, s.Items)
 		if err != nil {
 			return nil, err
 		}
@@ -184,12 +187,12 @@ func (g *generator) goType(s *schema.Schema) (*gengo.Type, error) {
 		}, nil
 	}
 	if s.Ref != nil && strings.HasPrefix(string(*s.Ref), defPrefix) {
-		return g.goIdentType(strings.TrimPrefix(string(*s.Ref), defPrefix))
+		return g.goIdentType(name, strings.TrimPrefix(string(*s.Ref), defPrefix))
 	}
 	return nil, fmt.Errorf("fail to find Go type for %v", s)
 }
 
-func (g *generator) goIdentType(typ string) (*gengo.Type, error) {
+func (g *generator) goIdentType(name, typ string) (*gengo.Type, error) {
 	ident := ""
 	switch typ {
 	case "string":
@@ -199,7 +202,14 @@ func (g *generator) goIdentType(typ string) (*gengo.Type, error) {
 	case "boolean_int":
 		ident = "BoolInt"
 	case "number":
-		ident = "float32"
+		name = strings.ToLower(name)
+		if strings.Contains(name, "price") ||
+			strings.Contains(name, "floor") ||
+			strings.Contains(name, "ratio") {
+			ident = "decimal.D"
+		} else {
+			ident = "float64"
+		}
 	default:
 		ident = g.exportedGoName(typ)
 	}
