@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"h12.me/gengo"
-	"h12.me/json-schema"
+	"h12.io/gengo"
+	"h12.io/json-schema"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 		PackageName: "openrtb",
 		TypeDecls:   g.filterDecls(decls),
 		Imports: []*gengo.Import{
-			{Path: "h12.me/decimal"},
+			{Path: "h12.io/decimal"},
 		},
 	}
 	sort.Sort(codeFile.TypeDecls)
